@@ -1,151 +1,135 @@
 const express = require( 'express' );
 const bodyParser = require( 'body-parser' );
 const morgan = require( 'morgan' );
+const uuid = require('uuid');
+const validateToken = require('./middleware/validateToken');
+const { check, validationResult } = require('express-validator');
 
 const app = express();
 const jsonParser = bodyParser.json();
 
-app.use( morgan( 'dev' ) );
+app.use(morgan('dev'));
+app.use(validateToken)
 
-let listOfStudents = [
+let listOfPosts = [
     {
-        name : "Marcel",
-        id : 123
+        id : uuid.v4(),
+        title : "Example post 1",
+        description: "Example description 1",
+        url: "https://www.google.com",
+        rating: 3
     },
     {
-        name : "Martha",
-        id : 456
+        id : uuid.v4(),
+        title : "Example post 2",
+        description: "Example description 2",
+        url: "https://www.google.com",
+        rating: 3
     },
     {
-        name : "Julieta",
-        id : 789
+        id : uuid.v4(),
+        title : "Example post 3",
+        description: "Example description 3",
+        url: "https://www.google.com",
+        rating: 3
     },
-    {
-        name: "Alfredo",
-        id : 847
-    }
 ];
 
-app.get( '/api/students', ( req, res ) => {
-    console.log( "Getting all students." );
-
-    return res.status( 200 ).json( listOfStudents );
+app.get( '/bookmarks', ( req, res ) => {
+    return res.status( 200 ).json( listOfPosts );
 });
 
-app.get( '/api/studentById', ( req, res ) => {
-    console.log( "Getting a student by id using the query string." );
-
-    console.log( req.query );
-
-    let id = req.query.id; 
-
-    if( !id ){
-        res.statusMessage = "Please send the 'id' as parameter.";
-        return res.status( 406 ).end();
+app.post( '/bookmarks', jsonParser, [
+    check('title').isString().not().isEmpty(),
+    check('description').isString().not().isEmpty(),
+    check('url').isString().not().isEmpty(),
+    check('rating').isNumeric().not().isEmpty(),
+], ( req, res ) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+        return res.status(406).json({ errors: errors.array({ onlyFirstError: true }) })
     }
 
-    let result = listOfStudents.find( ( student ) => {
-        if( student.id ===  Number( id ) ){
-            return student;
-        }
-    });
-
-    if( !result ){
-        res.statusMessage = `There are no students with the provided 'id=${id}'.`;
-        return res.status( 404 ).end();
+    let newPost = {
+        id : uuid.v4(),
+        title : req.body.title,
+        description: req.body.description,
+        url: req.body.url,
+        rating: req.body.rating
     }
 
-    return res.status( 200 ).json( result ); 
+    listOfPosts.push(newPost)
+
+    return res.status( 201 ).json(newPost);
 });
 
-app.get( '/api/getStudentById/:id', ( req, res ) => {
-    console.log( "Getting a student by id using the integrated param." );
-    console.log( req.params );
-
-    let id = req.params.id;
-
-    let result = listOfStudents.find( ( student ) => {
-        if( student.id === Number( id ) ){
-            return student;
-        }
-    });
-
-    if( !result ){
-        res.statusMessage = `There are no students with the provided 'id=${id}'.`;
-        return res.status( 404 ).end();
-    }
-
-    return res.status( 200 ).json( result ); 
-});
-
-app.post( '/api/createStudent', jsonParser, ( req, res ) => {
-    console.log( "Adding a new student to the list." );
-    console.log( "Body ", req.body );
-
-    let name = req.body.name;
-    let id = req.body.id;
-
-    if( !id || !name ){
-        res.statusMessage = "One of these parameters is missing in the request: 'id' or 'name'.";
-        return res.status( 406 ).end();
-    }
-
-    if( typeof(id) !== 'number' ){
-        res.statusMessage = "The 'id' MUST be a number.";
-        return res.status( 409 ).end();
-    }
-    
-    let flag = true;
-
-    for( let i = 0; i < listOfStudents.length; i ++ ){
-        if( listOfStudents[i].id === id ){
-            flag = !flag;
-            break;
+const findPostById = (id) => {
+    for (let i = 0; i<listOfPosts.length; i++) {
+        if (listOfPosts[i].id == id) {
+            return i;
         }
     }
+    return -1;
+}
 
-    if( flag ){
-        let newStudent = { name, id };
-        listOfStudents.push( newStudent );
-
-        return res.status( 201 ).json( newStudent ); 
+app.patch( '/bookmark/:id', jsonParser, [
+    check('id').isString().not().isEmpty(),
+],( req, res ) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty()) {
+        return res.status(406).json({ errors: errors.array({ onlyFirstError: true }) })
     }
-    else{
-        res.statusMessage = "The 'id' is already on the student list.";
-        return res.status( 409 ).end();
+
+    if (req.params.id != req.body.id) {
+        res.statusMessage = `The id in the body doesn't match the one on the params`;
+        return res.status(409).end();
+    }
+
+    let postIndex = findPostById(req.params.id);
+    if (postIndex != -1) {
+        let updatedPost = listOfPosts[postIndex];
+        for (key in req.body.object) {
+            updatedPost[key] = req.body.object[key];
+        }
+        listOfPosts[postIndex] = updatedPost;
+        return res.status(202).json(updatedPost);
+    } else {
+        res.statusMessage = `Wasn't able to find a post with the id ${req.params.id}`;
+        return res.status(404).end();
     }
 });
 
-app.delete( '/api/removeStudent', ( req, res ) => {
-    
-    let id = req.query.id;
-
-    if( !id ){
-        res.statusMessage = "Please send the 'id' to delete a student";
-        return res.status( 406 ).end();
+app.delete( '/bookmark/:id', ( req, res ) => {
+    let postIndex = findPostById(req.params.id);
+    if (postIndex != -1) {
+        listOfPosts.splice(postIndex, 1);
+        return res.status(200).end();
+    } else {
+        res.statusMessage = `Wasn't able to find a post with the id ${req.params.id}`;
+        return res.status(404).end();
     }
+});
 
-    let itemToRemove = listOfStudents.findIndex( ( student ) => {
-        if( student.id === Number( id ) ){
-            return true;
+app.get( '/bookmark', ( req, res ) => {
+    console.log(req.query);
+    var title = req.query.title;
+    console.log(title)
+    if (title) {
+        var foundPosts = listOfPosts.filter(post => post.title == title);
+        
+        if (foundPosts.length > 0) {
+            return res.status(200).json(foundPosts);
+        } else {
+            res.statusMessage = `The title ${title} wasn't found on any of our titles.`;
+            return res.status(404).end();
         }
-    });
-
-    if( itemToRemove < 0 ){
-        res.statusMessage = "That 'id' was not found in the list of students.";
-        return res.status( 400 ).end();
+        
+    } else {
+        res.statusMessage = 'A title is required in this endpoint.';
+        return res.status(406).end();
     }
-
-    listOfStudents.splice( itemToRemove, 1 );
-    return res.status( 204 ).end();
 });
 
 app.listen( 8080, () => {
     console.log( "This server is running on port 8080" );
 });
-
-
-// Base URL : http://localhost:8080/
-// GET endpoint : http://localhost:8080/api/students
-// GET by id in query : http://localhost:8080/api/studentById?id=123
-// GET by id in param : http://localhost:8080/api/getStudentById/123
